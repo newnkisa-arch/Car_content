@@ -1,0 +1,1427 @@
+
+# I'll create the complete notebook as a Python script first, then save it
+notebook_script = '''
+"""
+🚗 AI CAR CONTENT STUDIO - COMPLETE COLAB NOTEBOOK
+Professional-grade automotive content creation with realistic avatar lip-sync
+"""
+
+# =============================================================================
+# CELL 1: ENVIRONMENT SETUP & DEPENDENCIES
+# =============================================================================
+
+def cell1_setup():
+    """Install all required packages for avatar generation, lip-sync, and video processing"""
+    import subprocess
+    import sys
+    import os
+    import warnings
+    warnings.filterwarnings('ignore')
+    
+    print("🔧 Setting up AI Car Content Studio environment...")
+    
+    # Core packages
+    packages = [
+        "torch==2.1.0", "torchvision==0.16.0", "torchaudio==2.1.0",
+        "opencv-python-headless", "opencv-contrib-python", "mediapipe",
+        "librosa", "soundfile", "numpy<2", "scipy", "Pillow",
+        "imageio", "imageio-ffmpeg", "moviepy", "pydub",
+        "edge-tts", "transformers", "accelerate", "diffusers",
+        "insightface", "onnxruntime-gpu", "basicsr", "facexlib",
+        "gfpgan", "realesrgan", "tqdm", "requests", "pytrends",
+        "gdown", "wget", "av", "decord", "lpips", "scikit-image",
+        "matplotlib", "pandas", "yt-dlp", "rembg", "xformers",
+    ]
+    
+    for pkg in packages:
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", pkg])
+            print(f"✅ {pkg}")
+        except:
+            print(f"⚠️  {pkg} - trying alternative...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", pkg])
+    
+    # Install ffmpeg
+    !apt-get update -qq && apt-get install -y -qq ffmpeg libsm6 libxext6 libgl1
+    
+    print("\n📁 Creating project directories...")
+    dirs = [
+        "/content/car_ai_studio", "/content/car_ai_studio/inputs",
+        "/content/car_ai_studio/outputs", "/content/car_ai_studio/models",
+        "/content/car_ai_studio/temp", "/content/car_ai_studio/assets",
+        "/content/car_ai_studio/assets/music", "/content/car_ai_studio/assets/backgrounds",
+        "/content/car_ai_studio/assets/overlays", "/content/car_ai_studio/wav2lip",
+        "/content/car_ai_studio/gfpgan", "/content/car_ai_studio/face_enhance",
+    ]
+    for d in dirs:
+        os.makedirs(d, exist_ok=True)
+    
+    print("✅ All directories created!")
+
+
+# =============================================================================
+# CELL 2: DOWNLOAD AI MODELS & ASSETS
+# =============================================================================
+
+def cell2_download_models():
+    """Download Wav2Lip, GFPGAN, Real-ESRGAN, and other models"""
+    import os
+    import wget
+    from pydub import AudioSegment
+    import numpy as np
+    
+    print("📥 Downloading AI models and assets...")
+    base_path = "/content/car_ai_studio/models"
+    
+    # Wav2Lip Models
+    print("\n🎭 Downloading Wav2Lip models...")
+    !wget -q "https://github.com/Rudrabha/Wav2Lip/releases/download/v1.0.0/wav2lip_gan.pth" -O {base_path}/wav2lip_gan.pth
+    !wget -q "https://github.com/Rudrabha/Wav2Lip/releases/download/v1.0.0/wav2lip.pth" -O {base_path}/wav2lip.pth
+    
+    # GFPGAN
+    print("\n✨ Downloading GFPGAN models...")
+    !wget -q "https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth" -O {base_path}/GFPGANv1.4.pth
+    !wget -q "https://github.com/TencentARC/GFPGAN/releases/download/v1.3.4/RestoreFormerPlusPlus.pth" -O {base_path}/RestoreFormerPlusPlus.pth
+    
+    # Real-ESRGAN
+    print("\n🔍 Downloading Real-ESRGAN models...")
+    !wget -q "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth" -O {base_path}/RealESRGAN_x4plus.pth
+    
+    # CodeFormer
+    print("\n🎨 Downloading CodeFormer models...")
+    !wget -q "https://github.com/sczhou/CodeFormer/releases/download/v0.1.0/codeformer.pth" -O {base_path}/codeformer.pth
+    
+    # Clone repos
+    print("\n📦 Cloning repositories...")
+    %cd /content/car_ai_studio/wav2lip
+    !git clone -q https://github.com/Rudrabha/Wav2Lip.git .
+    !pip install -q -r requirements.txt
+    
+    %cd /content/car_ai_studio/gfpgan
+    !git clone -q https://github.com/TencentARC/GFPGAN.git .
+    !pip install -q basicsr facexlib
+    !pip install -q -r requirements.txt
+    !python setup.py develop
+    
+    # Background music
+    print("\n🎵 Setting up background music...")
+    def create_fallback_music(duration_ms=120000, filename="fallback.mp3"):
+        sample_rate = 44100
+        t = np.linspace(0, duration_ms/1000, int(sample_rate * duration_ms/1000))
+        freq1, freq2, freq3 = 220, 277, 329
+        wave = (0.3 * np.sin(2 * np.pi * freq1 * t) +
+                0.2 * np.sin(2 * np.pi * freq2 * t) +
+                0.2 * np.sin(2 * np.pi * freq3 * t))
+        wave *= (0.8 + 0.2 * np.sin(2 * np.pi * 0.5 * t))
+        audio = (wave * 32767).astype(np.int16)
+        song = AudioSegment(audio.tobytes(), frame_rate=sample_rate, sample_width=2, channels=1)
+        song.export(f"/content/car_ai_studio/assets/music/{filename}", format="mp3")
+    
+    create_fallback_music()
+    print("\n🎉 All models and assets ready!")
+
+
+# =============================================================================
+# CELL 3: CONFIGURATION & IMPORTS
+# =============================================================================
+
+def cell3_config():
+    """Import libraries and set up configuration"""
+    import torch
+    import cv2
+    import numpy as np
+    import mediapipe as mp
+    from PIL import Image, ImageFilter, ImageEnhance
+    import librosa
+    import soundfile as sf
+    from moviepy.editor import *
+    from pydub import AudioSegment
+    import edge_tts
+    import asyncio
+    from transformers import pipeline
+    from pytrends.request import TrendReq
+    import requests
+    import random
+    import os
+    from pathlib import Path
+    from tqdm import tqdm
+    import warnings
+    warnings.filterwarnings('ignore')
+    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"🖥️  Device: {device}")
+    if torch.cuda.is_available():
+        print(f"   GPU: {torch.cuda.get_device_name(0)}")
+        print(f"   VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+    
+    class Config:
+        BASE_DIR = "/content/car_ai_studio"
+        INPUTS_DIR = f"{BASE_DIR}/inputs"
+        OUTPUTS_DIR = f"{BASE_DIR}/outputs"
+        MODELS_DIR = f"{BASE_DIR}/models"
+        TEMP_DIR = f"{BASE_DIR}/temp"
+        ASSETS_DIR = f"{BASE_DIR}/assets"
+        MUSIC_DIR = f"{ASSETS_DIR}/music"
+        BG_DIR = f"{ASSETS_DIR}/backgrounds"
+        OVERLAY_DIR = f"{ASSETS_DIR}/overlays"
+        
+        VIDEO_WIDTH = 1080
+        VIDEO_HEIGHT = 1920
+        FPS = 30
+        MAX_DURATION = 120
+        
+        PLATFORMS = {
+            'instagram_reels': {'width': 1080, 'height': 1920, 'duration': 90, 'format': 'mp4'},
+            'tiktok': {'width': 1080, 'height': 1920, 'duration': 60, 'format': 'mp4'},
+            'youtube_shorts': {'width': 1080, 'height': 1920, 'duration': 60, 'format': 'mp4'},
+        }
+        
+        AVATAR_SIZE = (400, 500)
+        AVATAR_POSITION = ('right', 'bottom')
+        AVATAR_PADDING = 20
+        CHAIN_ENHANCEMENT = True
+        FACE_ENHANCEMENT = True
+        
+        LIP_SYNC_MODEL = 'wav2lip_gan'
+        LIP_SYNC_BATCH_SIZE = 16
+        
+        VOICE = 'en-US-GuyNeural'
+        VOICE_SPEED = '+0%'
+        VOICE_PITCH = '+0Hz'
+        MUSIC_VOLUME = -20
+        VOICE_VOLUME = 0
+        
+        CAR_TIPS = [
+            {
+                'title': 'Pre-Drive Safety Check',
+                'tips': [
+                    'Check all mirrors before moving - adjust for blind spots',
+                    'Walk around your vehicle to check for obstacles or children',
+                    'Test your brakes before leaving your parking spot',
+                    'Ensure all doors are properly closed and locked',
+                    'Check tire pressure visually before every drive',
+                ]
+            },
+            {
+                'title': 'Oil Change Importance',
+                'tips': [
+                    'Change oil every 5,000-7,500 miles for optimal engine health',
+                    'Use the manufacturer recommended oil grade only',
+                    'Check oil level monthly - low oil destroys engines fast',
+                    'Dark dirty oil means its time for a change immediately',
+                    'Synthetic oil lasts longer but costs more upfront',
+                ]
+            },
+            {
+                'title': 'Tire Safety Secrets',
+                'tips': [
+                    'Rotate tires every 6,000 miles for even wear',
+                    'Check tread depth with a quarter - insert upside down',
+                    'Maintain proper PSI - check monthly when tires are cold',
+                    'Misaligned wheels cause uneven wear and poor handling',
+                    'Spare tire pressure needs checking too - dont forget it',
+                ]
+            },
+            {
+                'title': 'Brake System Warning Signs',
+                'tips': [
+                    'Squealing noise means brake pads are wearing thin',
+                    'Spongy brake pedal indicates air in brake lines',
+                    'Car pulling to one side when braking is dangerous',
+                    'Brake fluid should be changed every 2 years minimum',
+                    'Grinding metal sound means immediate service needed',
+                ]
+            },
+            {
+                'title': 'Fuel Efficiency Hacks',
+                'tips': [
+                    'Remove excess weight - every 100 lbs reduces MPG by 2%',
+                    'Keep tires properly inflated for best fuel economy',
+                    'Use cruise control on highways to maintain steady speed',
+                    'Aggressive acceleration burns 40% more fuel',
+                    'Idling for more than 10 seconds wastes more fuel than restarting',
+                ]
+            },
+            {
+                'title': 'Winter Car Care',
+                'tips': [
+                    'Never pour hot water on frozen windshield - it cracks glass',
+                    'Keep gas tank at least half full to prevent fuel line freeze',
+                    'Use winter-grade windshield washer fluid only',
+                    'Test battery before winter - cold reduces capacity by 50%',
+                    'Invest in quality winter tires - all-seasons fail below 45°F',
+                ]
+            },
+        ]
+        
+        TREND_HOOKS = [
+            "Most drivers don't know this...",
+            "This mistake can destroy your car...",
+            "Stop doing this immediately...",
+            "Your mechanic doesn't want you to know...",
+            "This car hack will save you thousands...",
+            "I wish I knew this before...",
+            "Never ignore these warning signs...",
+            "The truth about car maintenance...",
+            "This is why your car breaks down...",
+            "Every driver needs to hear this...",
+        ]
+        
+        FASHION_STYLES = [
+            {'name': 'classic_black', 'shirt_color': (20, 20, 20), 'chain_style': 'iced_out'},
+            {'name': 'street_wear', 'shirt_color': (40, 40, 50), 'chain_style': 'thick_cuban'},
+            {'name': 'luxury_vibe', 'shirt_color': (10, 10, 15), 'chain_style': 'diamond_pendant'},
+            {'name': 'casual_fresh', 'shirt_color': (30, 35, 40), 'chain_style': 'rope_chain'},
+        ]
+        
+        BG_SCENES = [
+            'luxury_car_interior', 'car_engine_closeup', 'highway_driving',
+            'car_wash_detail', 'garage_workspace', 'sunset_drive',
+            'city_traffic', 'mechanic_tools',
+        ]
+    
+    return Config()
+
+
+# =============================================================================
+# CELL 4: AVATAR PROCESSOR
+# =============================================================================
+
+def cell4_avatar_processor(config):
+    """Advanced face detection, enhancement, and silver chain realism"""
+    import cv2
+    import numpy as np
+    import mediapipe as mp
+    from PIL import Image, ImageEnhance
+    from tqdm import tqdm
+    
+    class AvatarProcessor:
+        def __init__(self, config):
+            self.config = config
+            self.mp_face_mesh = mp.solutions.face_mesh
+            self.face_mesh = self.mp_face_mesh.FaceMesh(
+                static_image_mode=False, max_num_faces=1,
+                refine_landmarks=True, min_detection_confidence=0.5,
+                min_tracking_confidence=0.5
+            )
+        
+        def detect_face_region(self, frame):
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = self.face_mesh.process(rgb)
+            if results.multi_face_landmarks:
+                landmarks = results.multi_face_landmarks[0].landmark
+                h, w = frame.shape[:2]
+                x_coords = [int(lm.x * w) for lm in landmarks]
+                y_coords = [int(lm.y * h) for lm in landmarks]
+                x_min, x_max = min(x_coords), max(x_coords)
+                y_min, y_max = min(y_coords), max(y_coords)
+                pad_x = int((x_max - x_min) * 0.2)
+                pad_y = int((y_max - y_min) * 0.3)
+                x_min = max(0, x_min - pad_x)
+                x_max = min(w, x_max + pad_x)
+                y_min = max(0, y_min - pad_y)
+                y_max = min(h, y_max + pad_y)
+                return (x_min, y_min, x_max, y_max), landmarks
+            return None, None
+        
+        def enhance_silver_chain(self, frame, landmarks):
+            """Make silver chain more realistic and prominent as brand logo"""
+            if landmarks is None:
+                return frame
+            h, w = frame.shape[:2]
+            output = frame.copy()
+            
+            # Neck landmarks for chain region
+            neck_indices = [152, 148, 176, 149, 150, 136, 172, 58, 132, 93]
+            neck_points = []
+            for idx in neck_indices:
+                if idx < len(landmarks):
+                    x = int(landmarks[idx].x * w)
+                    y = int(landmarks[idx].y * h)
+                    neck_points.append((x, y))
+            
+            if len(neck_points) < 3:
+                return frame
+            
+            mask = np.zeros((h, w), dtype=np.uint8)
+            pts = np.array(neck_points, np.int32)
+            cv2.fillPoly(mask, [pts], 255)
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+            mask = cv2.dilate(mask, kernel, iterations=2)
+            
+            # Enhance metallic appearance
+            lab = cv2.cvtColor(output, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+            l_enhanced = clahe.apply(l)
+            l_masked = l.copy()
+            l_masked[mask > 0] = l_enhanced[mask > 0]
+            
+            sharpen_kernel = np.array([[-1,-1,-1],[-1,9,-1],[-1,-1,-1]])
+            sharpened = cv2.filter2D(output, -1, sharpen_kernel)
+            alpha = 0.3
+            output[mask > 0] = cv2.addWeighted(output, 1-alpha, sharpened, alpha, 0)[mask > 0]
+            
+            # Add metallic shine
+            shine = np.zeros_like(output)
+            shine[mask > 0] = [220, 220, 230]
+            output = cv2.addWeighted(output, 1.0, shine, 0.08, 0)
+            
+            return output
+        
+        def remove_original_lip_movement(self, frame, landmarks):
+            """Neutralize original lip movements for clean lip-sync overlay"""
+            if landmarks is None:
+                return frame
+            h, w = frame.shape[:2]
+            output = frame.copy()
+            
+            lip_indices = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 409, 270, 269, 267, 0, 37, 39, 40, 185]
+            lip_points = []
+            for idx in lip_indices:
+                if idx < len(landmarks):
+                    x = int(landmarks[idx].x * w)
+                    y = int(landmarks[idx].y * h)
+                    lip_points.append((x, y))
+            
+            if len(lip_points) < 4:
+                return frame
+            
+            mask = np.zeros((h, w), dtype=np.uint8)
+            pts = np.array(lip_points, np.int32)
+            cv2.fillPoly(mask, [pts], 255)
+            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (8, 8))
+            mask = cv2.dilate(mask, kernel, iterations=1)
+            
+            dilated_mask = cv2.dilate(mask, np.ones((20, 20), np.uint8), iterations=2)
+            surrounding = dilated_mask - mask
+            skin_color = cv2.mean(frame, mask=surrounding)[:3]
+            neutral_color = tuple(int(c * 0.85) for c in skin_color)
+            colored_lip = np.full_like(frame, neutral_color)
+            
+            mask_float = mask.astype(float) / 255.0
+            mask_3ch = np.stack([mask_float] * 3, axis=-1)
+            output = (output * (1 - mask_3ch) + colored_lip * mask_3ch).astype(np.uint8)
+            
+            blurred = cv2.GaussianBlur(output, (5, 5), 0)
+            edge_mask = cv2.dilate(mask, np.ones((3,3), np.uint8), iterations=1) - cv2.erode(mask, np.ones((3,3), np.uint8), iterations=1)
+            edge_mask_3ch = np.stack([edge_mask.astype(float)/255.0] * 3, axis=-1)
+            output = (output * (1 - edge_mask_3ch) + blurred * edge_mask_3ch).astype(np.uint8)
+            
+            return output
+        
+        def enhance_face_realism(self, frame):
+            pil_img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            enhancer = ImageEnhance.Sharpness(pil_img)
+            pil_img = enhancer.enhance(1.2)
+            enhancer = ImageEnhance.Color(pil_img)
+            pil_img = enhancer.enhance(1.05)
+            enhancer = ImageEnhance.Contrast(pil_img)
+            pil_img = enhancer.enhance(1.05)
+            return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+        
+        def process_avatar_frame(self, frame, neutralize_lips=True, enhance_chain=True):
+            bbox, landmarks = self.detect_face_region(frame)
+            if neutralize_lips and landmarks is not None:
+                frame = self.remove_original_lip_movement(frame, landmarks)
+            if enhance_chain and landmarks is not None:
+                frame = self.enhance_silver_chain(frame, landmarks)
+            frame = self.enhance_face_realism(frame)
+            return frame, bbox, landmarks
+        
+        def process_avatar_video(self, input_path, output_path, neutralize_lips=True, enhance_chain=True):
+            cap = cv2.VideoCapture(input_path)
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+            
+            print(f"🎬 Processing {total_frames} frames...")
+            for i in tqdm(range(total_frames), desc="Processing avatar"):
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                processed, _, _ = self.process_avatar_frame(frame, neutralize_lips, enhance_chain)
+                out.write(processed)
+            
+            cap.release()
+            out.release()
+            print(f"✅ Avatar processed: {output_path}")
+            return output_path
+    
+    return AvatarProcessor(config)
+
+
+# =============================================================================
+# CELL 5: LIP-SYNC ENGINE
+# =============================================================================
+
+def cell5_lipsync_engine(config):
+    """Wav2Lip-based lip synchronization"""
+    import sys
+    sys.path.insert(0, '/content/car_ai_studio/wav2lip')
+    
+    import torch
+    import cv2
+    import numpy as np
+    from tqdm import tqdm
+    
+    try:
+        import face_detection
+        import audio
+        from models import Wav2Lip
+    except ImportError as e:
+        print(f"⚠️  Wav2Lip import issue: {e}")
+        print("Using fallback lip-sync method...")
+        return None
+    
+    class LipSyncEngine:
+        def __init__(self, config):
+            self.config = config
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            self.model = self._load_model()
+            self.detector = face_detection.FaceAlignment(
+                face_detection.LandmarksType._2D,
+                flip_input=False, device=str(self.device)
+            )
+        
+        def _load_model(self):
+            model_path = f"{self.config.MODELS_DIR}/wav2lip_gan.pth"
+            if not os.path.exists(model_path):
+                model_path = f"{self.config.MODELS_DIR}/wav2lip.pth"
+            
+            model = Wav2Lip()
+            checkpoint = torch.load(model_path, map_location=self.device)
+            s = checkpoint["state_dict"] if "state_dict" in checkpoint else checkpoint
+            new_s = {}
+            for k, v in s.items():
+                new_s[k.replace('module.', '')] = v
+            model.load_state_dict(new_s)
+            model = model.to(self.device)
+            model.eval()
+            print(f"🎭 Wav2Lip loaded on {self.device}")
+            return model
+        
+        def _load_audio(self, audio_path):
+            wav = audio.load_wav(audio_path, 16000)
+            mel = audio.melspectrogram(wav)
+            mel = (mel - mel.mean()) / mel.std()
+            return mel, wav
+        
+        def _detect_faces(self, frames):
+            faces = []
+            for frame in frames:
+                preds = self.detector.get_detections_for_image(np.array(frame))
+                if len(preds) > 0:
+                    face = max(preds, key=lambda x: (x[2]-x[0])*(x[3]-x[1]))
+                    faces.append(face)
+                else:
+                    faces.append(None)
+            return faces
+        
+        def _crop_face(self, frame, face, pad=0.2):
+            if face is None:
+                return None, None
+            x1, y1, x2, y2 = face
+            h, w = frame.shape[:2]
+            pad_h = int((y2 - y1) * pad)
+            pad_w = int((x2 - x1) * pad)
+            x1 = max(0, x1 - pad_w)
+            y1 = max(0, y1 - pad_h)
+            x2 = min(w, x2 + pad_w)
+            y2 = min(h, y2 + pad_h)
+            face_img = frame[y1:y2, x1:x2]
+            return face_img, (x1, y1, x2, y2)
+        
+        def _preprocess_face(self, face_img, size=96):
+            if face_img is None:
+                return None
+            face_img = cv2.resize(face_img, (size, size))
+            face_img = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
+            face_img = (face_img / 255.0).astype(np.float32)
+            face_tensor = torch.from_numpy(face_img).permute(2, 0, 1).unsqueeze(0)
+            return face_tensor.to(self.device)
+        
+        def generate_lip_sync(self, face_video_path, audio_path, output_path, batch_size=16):
+            print("\n🎬 Starting lip-sync generation...")
+            mel, wav = self._load_audio(audio_path)
+            
+            reader = cv2.VideoCapture(face_video_path)
+            fps = reader.get(cv2.CAP_PROP_FPS)
+            total_frames = int(reader.get(cv2.CAP_PROP_FRAME_COUNT))
+            
+            frames = []
+            for _ in range(total_frames):
+                ret, frame = reader.read()
+                if not ret:
+                    break
+                frames.append(frame)
+            reader.release()
+            
+            print(f"   Video: {len(frames)} frames @ {fps}fps")
+            print(f"   Audio: {mel.shape[1]} mel frames")
+            
+            faces = self._detect_faces(frames)
+            
+            h, w = frames[0].shape[:2]
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(output_path, fourcc, fps, (w, h))
+            
+            print("\n🎭 Generating lip movements...")
+            mel_idx_multiplier = 80.0 / fps
+            
+            for i in tqdm(range(0, len(frames), batch_size), desc="Lip-sync batches"):
+                batch_frames = frames[i:i+batch_size]
+                batch_faces = faces[i:i+batch_size]
+                
+                face_tensors = []
+                mel_chunks = []
+                coords = []
+                valid_indices = []
+                
+                for j, (frame, face) in enumerate(zip(batch_frames, batch_faces)):
+                    if face is None:
+                        continue
+                    face_img, coord = self._crop_face(frame, face)
+                    face_tensor = self._preprocess_face(face_img)
+                    if face_tensor is None:
+                        continue
+                    
+                    mel_idx = int((i + j) * mel_idx_multiplier)
+                    mel_chunk = mel[:, mel_idx:mel_idx+16]
+                    if mel_chunk.shape[1] < 16:
+                        pad_width = 16 - mel_chunk.shape[1]
+                        mel_chunk = np.pad(mel_chunk, ((0,0), (0, pad_width)), mode='edge')
+                    
+                    mel_tensor = torch.from_numpy(mel_chunk).unsqueeze(0).to(self.device)
+                    
+                    face_tensors.append(face_tensor)
+                    mel_chunks.append(mel_tensor)
+                    coords.append(coord)
+                    valid_indices.append(j)
+                
+                if not face_tensors:
+                    for frame in batch_frames:
+                        out.write(frame)
+                    continue
+                
+                face_batch = torch.cat(face_tensors, dim=0)
+                mel_batch = torch.cat(mel_chunks, dim=0)
+                
+                with torch.no_grad():
+                    pred = self.model(mel_batch, face_batch)
+                
+                for j, (frame, coord, idx) in enumerate(zip(
+                    [batch_frames[v] for v in valid_indices], coords, valid_indices)):
+                    
+                    pred_face = pred[j].cpu().numpy().transpose(1, 2, 0)
+                    pred_face = (pred_face * 255).astype(np.uint8)
+                    pred_face = cv2.cvtColor(pred_face, cv2.COLOR_RGB2BGR)
+                    
+                    x1, y1, x2, y2 = coord
+                    pred_face = cv2.resize(pred_face, (x2-x1, y2-y1))
+                    
+                    mask = np.ones((y2-y1, x2-x1), dtype=np.float32)
+                    feather = 5
+                    mask[:feather, :] *= np.linspace(0, 1, feather)[:, None]
+                    mask[-feather:, :] *= np.linspace(1, 0, feather)[:, None]
+                    mask[:, :feather] *= np.linspace(0, 1, feather)[None, :]
+                    mask[:, -feather:] *= np.linspace(1, 0, feather)[None, :]
+                    
+                    mask_3ch = np.stack([mask] * 3, axis=-1)
+                    roi = frame[y1:y2, x1:x2]
+                    blended = (roi * (1 - mask_3ch) + pred_face * mask_3ch).astype(np.uint8)
+                    frame[y1:y2, x1:x2] = blended
+                    batch_frames[idx] = frame
+                
+                for frame in batch_frames:
+                    out.write(frame)
+            
+            out.release()
+            torch.cuda.empty_cache()
+            print(f"\n✅ Lip-sync complete: {output_path}")
+            return output_path
+    
+    return LipSyncEngine(config)
+
+
+# =============================================================================
+# CELL 6: CONTENT GENERATION
+# =============================================================================
+
+def cell6_content_engine(config):
+    """Generate viral car tips scripts with trend hooks"""
+    import random
+    from transformers import pipeline
+    import torch
+    
+    class ContentEngine:
+        def __init__(self, config):
+            self.config = config
+            try:
+                self.generator = pipeline(
+                    "text-generation", model="microsoft/phi-2",
+                    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                    device=0 if torch.cuda.is_available() else -1
+                )
+                self.use_ai = True
+            except:
+                print("⚠️  Could not load Phi-2, using template-based generation")
+                self.use_ai = False
+        
+        def generate_script(self, topic_idx=None, platform='youtube_shorts'):
+            if topic_idx is None:
+                topic_idx = random.randint(0, len(self.config.CAR_TIPS) - 1)
+            
+            topic = self.config.CAR_TIPS[topic_idx]
+            hook = random.choice(self.config.TREND_HOOKS)
+            
+            if platform == 'tiktok':
+                duration = 60
+            elif platform == 'instagram_reels':
+                duration = 90
+            else:
+                duration = 60
+            
+            script_lines = [
+                f"{hook}",
+                "",
+                f"{topic['title']} - here's what you need to know.",
+                "",
+            ]
+            
+            for i, tip in enumerate(topic['tips'][:4], 1):
+                script_lines.append(f"Number {i}: {tip}")
+                script_lines.append("")
+            
+            script_lines.extend([
+                "Don't let this happen to your car!",
+                "",
+                "Follow for more car tips that save you money.",
+                "",
+                "Drop a 🔧 if this helped you!",
+            ])
+            
+            full_script = "\\n".join(script_lines)
+            
+            hashtags = [
+                "#CarTips", "#AutoCare", "#CarMaintenance", "#DrivingTips",
+                "#CarHacks", "#AutoRepair", "#CarLife", "#VehicleCare",
+                f"#{topic['title'].replace(' ', '')}", "#Cars", "#MechanicTips"
+            ]
+            
+            caption = f"{hook} {topic['title']} 🚗💨 Save this for later! {' '.join(hashtags[:5])}"
+            
+            return {
+                'hook': hook, 'title': topic['title'], 'script': full_script,
+                'clean_script': ' '.join([line for line in script_lines if line]),
+                'caption': caption, 'hashtags': hashtags, 'duration': duration,
+                'platform': platform, 'tips': topic['tips'][:4],
+            }
+        
+        def generate_all_scripts(self):
+            platforms = ['youtube_shorts', 'tiktok', 'instagram_reels', 'youtube_shorts', 'tiktok']
+            scripts = []
+            used_topics = set()
+            for i, platform in enumerate(platforms, 1):
+                available = [j for j in range(len(self.config.CAR_TIPS)) if j not in used_topics]
+                if not available:
+                    used_topics.clear()
+                    available = list(range(len(self.config.CAR_TIPS)))
+                topic_idx = random.choice(available)
+                used_topics.add(topic_idx)
+                script = self.generate_script(topic_idx, platform)
+                script['video_number'] = i
+                scripts.append(script)
+            return scripts
+    
+    return ContentEngine(config)
+
+
+# =============================================================================
+# CELL 7: AUDIO ENGINE
+# =============================================================================
+
+def cell7_audio_engine(config):
+    """Generate voiceovers and process background music"""
+    import edge_tts
+    import asyncio
+    from pydub import AudioSegment
+    import os
+    
+    class AudioEngine:
+        def __init__(self, config):
+            self.config = config
+            self.voice = config.VOICE
+            self.music_dir = config.MUSIC_DIR
+        
+        async def _generate_voice(self, text, output_path, voice=None, rate="+0%", pitch="+0Hz"):
+            if voice is None:
+                voice = self.voice
+            communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
+            await communicate.save(output_path)
+        
+        def generate_voiceover(self, text, output_path, voice=None):
+            """Generate voiceover using Edge TTS"""
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self._generate_voice(text, output_path, voice))
+            loop.close()
+            return output_path
+        
+        def add_background_music(self, voice_path, output_path, music_path=None, 
+                                  voice_vol=0, music_vol=-20, fade_in=2000, fade_out=3000):
+            """Mix voiceover with background music"""
+            voice = AudioSegment.from_file(voice_path)
+            
+            if music_path and os.path.exists(music_path):
+                music = AudioSegment.from_file(music_path)
+            else:
+                # Use fallback music
+                fallback = f"{self.music_dir}/fallback.mp3"
+                if os.path.exists(fallback):
+                    music = AudioSegment.from_file(fallback)
+                else:
+                    # Create silent track
+                    music = AudioSegment.silent(duration=len(voice))
+            
+            # Adjust music length to match voice
+            if len(music) < len(voice):
+                # Loop music
+                loops_needed = (len(voice) // len(music)) + 1
+                music = music * loops_needed
+            
+            music = music[:len(voice)]
+            
+            # Apply volume adjustments
+            voice = voice + voice_vol
+            music = music + music_vol
+            
+            # Fade in/out
+            music = music.fade_in(fade_in).fade_out(fade_out)
+            
+            # Mix
+            mixed = voice.overlay(music)
+            mixed.export(output_path, format="mp3", bitrate="192k")
+            
+            return output_path
+        
+        def normalize_audio(self, input_path, output_path, target_dBFS=-14):
+            """Normalize audio to target level"""
+            audio = AudioSegment.from_file(input_path)
+            change_in_dBFS = target_dBFS - audio.dBFS
+            normalized = audio.apply_gain(change_in_dBFS)
+            normalized.export(output_path, format="mp3")
+            return output_path
+    
+    return AudioEngine(config)
+
+
+# =============================================================================
+# CELL 8: VIDEO COMPOSITION ENGINE
+# =============================================================================
+
+def cell8_video_engine(config):
+    """Compose final videos with scenes, overlays, and effects"""
+    from moviepy.editor import *
+    from moviepy.video.fx.all import *
+    import numpy as np
+    import cv2
+    import random
+    
+    class VideoEngine:
+        def __init__(self, config):
+            self.config = config
+        
+        def create_text_overlay(self, text, size=(1080, 200), font_size=60, 
+                                 color='white', stroke_color='black', stroke_width=2):
+            """Create styled text clip"""
+            txt_clip = TextClip(
+                text, fontsize=font_size, color=color,
+                stroke_color=stroke_color, stroke_width=stroke_width,
+                font='Arial-Bold', method='caption', size=(size[0]-100, None),
+                align='center'
+            )
+            txt_clip = txt_clip.set_position('center')
+            
+            # Add background
+            bg = ColorClip(size=(size[0], txt_clip.h + 40), color=(0, 0, 0, 180))
+            bg = bg.set_opacity(0.7)
+            
+            composite = CompositeVideoClip([bg, txt_clip.set_position('center')])
+            return composite
+        
+        def create_hook_overlay(self, hook_text, duration=3):
+            """Create attention-grabbing hook overlay"""
+            txt = TextClip(
+                hook_text, fontsize=80, color='yellow',
+                stroke_color='red', stroke_width=3,
+                font='Arial-Bold', method='caption', size=(980, None),
+                align='center'
+            )
+            txt = txt.set_duration(duration).set_position('center')
+            
+            # Pulsing effect
+            txt = txt.fx(vfx.resize, lambda t: 1 + 0.05 * np.sin(t * 8))
+            
+            # Background flash
+            flash = ColorClip(size=(1080, 1920), color=(255, 255, 255))
+            flash = flash.set_duration(0.3).set_opacity(0.3)
+            
+            return txt, flash
+        
+        def create_subtitle_clip(self, text, duration, position=('center', 1600)):
+            """Create subtitle text with styling"""
+            words = text.split()
+            clips = []
+            word_duration = duration / max(len(words), 1)
+            
+            for i, word in enumerate(words):
+                # Highlight current word
+                highlighted = ' '.join([
+                    f"\\textcolor{{yellow}}{{{w}}}" if j == i else w 
+                    for j, w in enumerate(words)
+                ])
+                
+                txt = TextClip(
+                    text, fontsize=50, color='white',
+                    stroke_color='black', stroke_width=2,
+                    font='Arial-Bold', method='caption', size=(980, None),
+                    align='center'
+                )
+                txt = txt.set_duration(word_duration).set_position(position)
+                clips.append(txt)
+            
+            return concatenate_videoclips(clips) if clips else None
+        
+        def create_background_scene(self, scene_type, duration=4):
+            """Generate or load background scene"""
+            # Create colored gradient background as placeholder
+            # In production, this would load actual car footage
+            
+            colors = {
+                'luxury_car_interior': (20, 20, 30),
+                'car_engine_closeup': (40, 40, 40),
+                'highway_driving': (60, 80, 120),
+                'car_wash_detail': (100, 150, 200),
+                'garage_workspace': (50, 50, 50),
+                'sunset_drive': (200, 100, 50),
+                'city_traffic': (80, 80, 100),
+                'mechanic_tools': (60, 60, 70),
+            }
+            
+            color = colors.get(scene_type, (30, 30, 40))
+            
+            # Create gradient
+            def make_gradient(t):
+                frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+                for y in range(1920):
+                    ratio = y / 1920
+                    r = int(color[0] * (1 - ratio * 0.5))
+                    g = int(color[1] * (1 - ratio * 0.3))
+                    b = int(color[2] * (1 - ratio * 0.2))
+                    frame[y, :] = [r, g, b]
+                return frame
+            
+            clip = VideoClip(make_gradient, duration=duration)
+            
+            # Add subtle movement
+            clip = clip.fx(vfx.scroll, 20, 20)
+            
+            return clip
+        
+        def compose_video(self, avatar_clip, audio_clip, script_data, output_path,
+                          platform='youtube_shorts', num_scenes=5):
+            """Compose final video with all elements"""
+            print(f"\\n🎬 Composing {platform} video...")
+            
+            # Get platform settings
+            platform_config = self.config.PLATFORMS[platform]
+            target_duration = min(script_data['duration'], platform_config['duration'])
+            
+            # Resize avatar to fit
+            avatar_w, avatar_h = self.config.AVATAR_SIZE
+            avatar_clip = avatar_clip.resize(width=avatar_w)
+            
+            # Position avatar
+            if self.config.AVATAR_POSITION == ('right', 'bottom'):
+                avatar_pos = (1080 - avatar_w - self.config.AVATAR_PADDING, 
+                             1920 - avatar_clip.h - self.config.AVATAR_PADDING)
+            else:
+                avatar_pos = ('center', 'bottom')
+            
+            avatar_clip = avatar_clip.set_position(avatar_pos)
+            
+            # Create background scenes
+            scene_duration = target_duration / num_scenes
+            scenes = []
+            for i in range(num_scenes):
+                scene_type = random.choice(self.config.BG_SCENES)
+                scene = self.create_background_scene(scene_type, scene_duration)
+                scenes.append(scene)
+            
+            background = concatenate_videoclips(scenes)
+            background = background.loop(duration=target_duration)
+            
+            # Add hook at beginning
+            hook_clip, flash = self.create_hook_overlay(script_data['hook'], 3)
+            hook_clip = hook_clip.set_start(0)
+            
+            # Add title overlay
+            title = self.create_text_overlay(
+                script_data['title'], size=(1080, 150), font_size=70, color='yellow'
+            )
+            title = title.set_duration(4).set_start(3).set_position(('center', 200))
+            
+            # Add tips as overlays
+            tip_clips = []
+            tip_start = 7
+            for i, tip in enumerate(script_data['tips']):
+                tip_text = f"💡 {tip}"
+                tip_clip = self.create_text_overlay(tip_text, size=(1000, 200), font_size=45)
+                tip_clip = tip_clip.set_duration(8).set_start(tip_start + i * 9)
+                tip_clip = tip_clip.set_position(('center', 1400))
+                tip_clips.append(tip_clip)
+            
+            # Add CTA at end
+            cta = self.create_text_overlay(
+                "Follow for more tips! 🔧\\nDrop a comment below! 👇",
+                size=(1080, 200), font_size=55, color='cyan'
+            )
+            cta = cta.set_duration(5).set_start(target_duration - 5)
+            cta = cta.set_position(('center', 1500))
+            
+            # Compose all layers
+            layers = [background, avatar_clip, hook_clip, title] + tip_clips + [cta]
+            
+            final = CompositeVideoClip(layers, size=(1080, 1920))
+            final = final.set_duration(target_duration)
+            final = final.set_audio(audio_clip)
+            
+            # Add subtle zoom effect
+            final = final.fx(vfx.resize, lambda t: 1 + 0.02 * np.sin(t * 0.5))
+            
+            # Render
+            final.write_videofile(
+                output_path,
+                fps=self.config.FPS,
+                codec='libx264',
+                audio_codec='aac',
+                temp_audiofile=f"{self.config.TEMP_DIR}/temp_audio.m4a",
+                remove_temp=True,
+                threads=4,
+                preset='medium',
+                bitrate='8000k'
+            )
+            
+            print(f"✅ Video saved: {output_path}")
+            return output_path
+    
+    return VideoEngine(config)
+
+
+# =============================================================================
+# CELL 9: MAIN PIPELINE ORCHESTRATOR
+# =============================================================================
+
+def cell9_pipeline(config, avatar_processor, lip_sync_engine, content_engine, 
+                   audio_engine, video_engine):
+    """Main pipeline that orchestrates video generation"""
+    import os
+    import shutil
+    from moviepy.editor import VideoFileClip, AudioFileClip
+    
+    class AICarStudio:
+        def __init__(self, config, avatar_processor, lip_sync_engine, 
+                     content_engine, audio_engine, video_engine):
+            self.config = config
+            self.avatar_processor = avatar_processor
+            self.lip_sync_engine = lip_sync_engine
+            self.content_engine = content_engine
+            self.audio_engine = audio_engine
+            self.video_engine = video_engine
+        
+        def generate_video(self, video_number, avatar_input_path, platform='youtube_shorts'):
+            """Generate a single complete video"""
+            print(f"\\n{'='*60}")
+            print(f"🎬 GENERATING VIDEO {video_number} FOR {platform.upper()}")
+            print(f"{'='*60}")
+            
+            # Step 1: Generate content
+            print("\\n📝 Step 1: Generating content...")
+            scripts = self.content_engine.generate_all_scripts()
+            script = scripts[video_number - 1]
+            print(f"   Hook: {script['hook']}")
+            print(f"   Title: {script['title']}")
+            
+            # Step 2: Generate voiceover
+            print("\\n🎙️ Step 2: Generating voiceover...")
+            voice_path = f"{self.config.TEMP_DIR}/voice_{video_number}.mp3"
+            self.audio_engine.generate_voiceover(script['clean_script'], voice_path)
+            
+            # Step 3: Add background music
+            print("\\n🎵 Step 3: Adding background music...")
+            mixed_audio_path = f"{self.config.TEMP_DIR}/audio_{video_number}.mp3"
+            self.audio_engine.add_background_music(voice_path, mixed_audio_path)
+            
+            # Step 4: Process avatar video
+            print("\\n🎭 Step 4: Processing avatar video...")
+            processed_avatar_path = f"{self.config.TEMP_DIR}/avatar_processed_{video_number}.mp4"
+            self.avatar_processor.process_avatar_video(
+                avatar_input_path, processed_avatar_path,
+                neutralize_lips=True, enhance_chain=True
+            )
+            
+            # Step 5: Generate lip-sync
+            print("\\n🎬 Step 5: Generating lip-sync...")
+            if self.lip_sync_engine:
+                lipsync_path = f"{self.config.TEMP_DIR}/lipsync_{video_number}.mp4"
+                self.lip_sync_engine.generate_lip_sync(
+                    processed_avatar_path, voice_path, lipsync_path
+                )
+                avatar_clip = VideoFileClip(lipsync_path)
+            else:
+                # Fallback: use processed avatar without lip-sync
+                avatar_clip = VideoFileClip(processed_avatar_path)
+            
+            # Step 6: Compose final video
+            print("\\n🎨 Step 6: Composing final video...")
+            audio_clip = AudioFileClip(mixed_audio_path)
+            output_path = f"{self.config.OUTPUTS_DIR}/video_{video_number}_{platform}.mp4"
+            
+            self.video_engine.compose_video(
+                avatar_clip, audio_clip, script, output_path,
+                platform=platform, num_scenes=5
+            )
+            
+            # Cleanup temp files for this video
+            avatar_clip.close()
+            audio_clip.close()
+            
+            print(f"\\n✅ VIDEO {video_number} COMPLETE!")
+            print(f"   Output: {output_path}")
+            
+            return {
+                'video_path': output_path,
+                'script': script,
+                'platform': platform,
+            }
+        
+        def generate_all_videos(self, avatar_input_path):
+            """Generate all 5 videos for different platforms"""
+            print("\\n" + "="*60)
+            print("🚗 AI CAR CONTENT STUDIO - BATCH GENERATION")
+            print("="*60)
+            
+            platforms = ['youtube_shorts', 'tiktok', 'instagram_reels', 
+                        'youtube_shorts', 'tiktok']
+            results = []
+            
+            for i, platform in enumerate(platforms, 1):
+                try:
+                    result = self.generate_video(i, avatar_input_path, platform)
+                    results.append(result)
+                except Exception as e:
+                    print(f"\\n❌ Error generating video {i}: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+            
+            print("\\n" + "="*60)
+            print("🎉 ALL VIDEOS GENERATED!")
+            print("="*60)
+            for r in results:
+                print(f"   ✅ {r['platform']}: {r['video_path']}")
+            
+            return results
+    
+    return AICarStudio(config, avatar_processor, lip_sync_engine, 
+                       content_engine, audio_engine, video_engine)
+
+
+# =============================================================================
+# CELL 10: EXECUTE PIPELINE
+# =============================================================================
+
+def cell10_execute():
+    """Execute the complete pipeline"""
+    print("\\n" + "="*70)
+    print("🚗 AI CAR CONTENT STUDIO - EXECUTION")
+    print("="*70)
+    
+    # Check for input video
+    input_video = "/content/car_ai_studio/inputs/face.mp4"
+    if not os.path.exists(input_video):
+        # Try to find uploaded video
+        possible_paths = [
+            "/mnt/agents/upload/face.mp4",
+            "/content/face.mp4",
+            "/content/sample_data/face.mp4",
+        ]
+        for path in possible_paths:
+            if os.path.exists(path):
+                shutil.copy(path, input_video)
+                print(f"📁 Found input video at: {path}")
+                break
+    
+    if not os.path.exists(input_video):
+        print("⚠️  No input video found! Please upload your avatar video.")
+        print("   Upload to: /content/car_ai_studio/inputs/face.mp4")
+        return
+    
+    print(f"📁 Using input video: {input_video}")
+    
+    # Initialize all components
+    print("\\n🔧 Initializing components...")
+    config = cell3_config()
+    avatar_processor = cell4_avatar_processor(config)
+    lip_sync_engine = cell5_lipsync_engine(config)
+    content_engine = cell6_content_engine(config)
+    audio_engine = cell7_audio_engine(config)
+    video_engine = cell8_video_engine(config)
+    
+    # Create pipeline
+    studio = cell9_pipeline(config, avatar_processor, lip_sync_engine,
+                            content_engine, audio_engine, video_engine)
+    
+    # Generate all videos
+    results = studio.generate_all_videos(input_video)
+    
+    print("\\n" + "="*70)
+    print("📊 GENERATION SUMMARY")
+    print("="*70)
+    for i, result in enumerate(results, 1):
+        print(f"\\nVideo {i}:")
+        print(f"  Platform: {result['platform']}")
+        print(f"  Title: {result['script']['title']}")
+        print(f"  Hook: {result['script']['hook']}")
+        print(f"  Path: {result['video_path']}")
+        print(f"  Caption: {result['script']['caption'][:100]}...")
+    
+    print("\\n✅ All done! Check /content/car_ai_studio/outputs/")
+    return results
+
+
+# =============================================================================
+# CELL 11: ADVANCED FEATURES & UTILITIES
+# =============================================================================
+
+def cell11_advanced_features():
+    """Additional features for enhanced video production"""
+    
+    class AdvancedFeatures:
+        @staticmethod
+        def add_watermark(video_path, output_path, text="@YourCarChannel", 
+                         position=('right', 'top'), opacity=0.7):
+            """Add branded watermark"""
+            from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip
+            
+            video = VideoFileClip(video_path)
+            watermark = TextClip(
+                text, fontsize=30, color='white', stroke_color='black',
+                stroke_width=1, font='Arial-Bold'
+            )
+            watermark = watermark.set_duration(video.duration)
+            watermark = watermark.set_position(position)
+            watermark = watermark.set_opacity(opacity)
+            
+            final = CompositeVideoClip([video, watermark])
+            final.write_videofile(output_path, fps=30, codec='libx264')
+            video.close()
+            final.close()
+            return output_path
+        
+        @staticmethod
+        def add_progress_bar(video_path, output_path, color=(255, 215, 0)):
+            """Add progress bar at bottom"""
+            from moviepy.editor import VideoFileClip, ColorClip, CompositeVideoClip
+            
+            video = VideoFileClip(video_path)
+            w, h = video.size
+            
+            def make_bar(t):
+                progress = t / video.duration
+                bar_width = int(w * progress)
+                frame = np.zeros((h, w, 3), dtype=np.uint8)
+                cv2.rectangle(frame, (0, h-10), (bar_width, h), color, -1)
+                return frame
+            
+            bar = VideoClip(make_bar, duration=video.duration)
+            bar = bar.set_opacity(0.8)
+            
+            final = CompositeVideoClip([video, bar])
+            final.write_videofile(output_path, fps=30, codec='libx264')
+            video.close()
+            final.close()
+            return output_path
+        
+        @staticmethod
+        def auto_thumbnail(video_path, output_path, text="CAR TIPS"):
+            """Generate thumbnail from video frame"""
+            from moviepy.editor import VideoFileClip
+            
+            video = VideoFileClip(video_path)
+            # Get frame at 2 seconds
+            frame = video.get_frame(2)
+            
+            # Add text overlay
+            h, w = frame.shape[:2]
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            
+            # Add background rectangle
+            cv2.rectangle(frame, (50, h//2 - 100), (w-50, h//2 + 100), (0, 0, 0), -1)
+            cv2.rectangle(frame, (50, h//2 - 100), (w-50, h//2 + 100), (255, 215, 0), 5)
+            
+            # Add text
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            text_size = cv2.getTextSize(text, font, 3, 5)[0]
+            text_x = (w - text_size[0]) // 2
+            text_y = h // 2 + text_size[1] // 2
+            cv2.putText(frame, text, (text_x, text_y), font, 3, (255, 215, 0), 5)
+            
+            cv2.imwrite(output_path, frame)
+            video.close()
+            return output_path
+        
+        @staticmethod
+        def batch_resize_for_platforms(video_path, output_dir):
+            """Resize video for all platforms"""
+            from moviepy.editor import VideoFileClip
+            
+            sizes = {
+                'youtube_shorts': (1080, 1920),
+                'tiktok': (1080, 1920),
+                'instagram_reels': (1080, 1920),
+                'instagram_feed': (1080, 1080),
+                'twitter': (720, 1280),
+            }
+            
+            video = VideoFileClip(video_path)
+            results = {}
+            
+            for platform, (w, h) in sizes.items():
+                resized = video.resize(newsize=(w, h))
+                output = f"{output_dir}/{platform}_{os.path.basename(video_path)}"
+                resized.write_videofile(output, fps=30, codec='libx264')
+                results[platform] = output
+                resized.close()
+            
+            video.close()
+            return results
+    
+    return AdvancedFeatures()
+
+
+# =============================================================================
+# CELL 12: GRADIO WEB INTERFACE
+# =============================================================================
+
+def cell12_gradio_interface():
+    """Create web interface for easy video generation"""
+    try:
+        import gradio as gr
+    except ImportError:
+        !pip install -q gradio
+        import gradio as gr
+    
+    def generate_single_video(avatar_video, platform, topic, hook_style, 
+                              voice_speed, music_volume, add_watermark):
+        """Generate a single video via web interface"""
+        # Save uploaded video
+        input_path = "/content/car_ai_studio/inputs/uploaded_avatar.mp4"
+        shutil.copy(avatar_video, input_path)
+        
+        # Update config
+        config = cell3_config()
+        config.VOICE_SPEED = f"{voice_speed}%"
+        config.MUSIC_VOLUME = music_volume
+        
+        # Generate
+        avatar_processor = cell4_avatar_processor(config)
+        lip_sync_engine = cell5_lipsync_engine(config)
+        content_engine = cell6_content_engine(config)
+        audio_engine = cell7_audio_engine(config)
+        video_engine = cell8_video_engine(config)
+        
+        studio = cell9_pipeline(config, avatar_processor, lip_sync_engine,
+                                content_engine, audio_engine, video_engine)
+        
+        result = studio.generate_video(1, input_path, platform)
+        
+        if add_watermark:
+            advanced = cell11_advanced_features()
+            advanced.add_watermark(result['video_path'], result['video_path'])
+        
+        return result['video_path'], result['script']['caption'], result['script']['hashtags']
+    
+    # Create interface
+    with gr.Blocks(title="AI Car Content Studio") as demo:
+        gr.Markdown("# 🚗 AI Car Content Studio")
+        gr.Markdown("Generate viral car tip videos with realistic avatar lip-sync")
+        
+        with gr.Row():
+            with gr.Column():
+                avatar_input = gr.Video(label="Upload Avatar Video")
+                platform = gr.Dropdown(
+                    choices=['youtube_shorts', 'tiktok', 'instagram_reels'],
+                    value='youtube_shorts', label="Platform"
+                )
+                topic = gr.Dropdown(
+                    choices=[t['title'] for t in Config().CAR_TIPS],
+                    value='Pre-Drive Safety Check', label="Topic"
+                )
+                hook_style = gr.Dropdown(
+                    choices=Config().TREND_HOOKS,
+                    value="Most drivers don't know this...", label="Hook Style"
+                )
+            
+            with gr.Column():
+                voice_speed = gr.Slider(-50, 50, 0, label="Voice Speed (%)")
+                music_volume = gr.Slider(-40, 0, -20, label="Music Volume (dB)")
+                add_watermark = gr.Checkbox(label="Add Watermark", value=True)
+                generate_btn = gr.Button("🎬 Generate Video", variant="primary")
+        
+        with gr.Row():
+            video_output = gr.Video(label="Generated Video")
+            caption_output = gr.Textbox(label="Caption")
+            hashtags_output = gr.Textbox(label="Hashtags")
+        
+        generate_btn.click(
+            generate_single_video,
+            inputs=[avatar_input, platform, topic, hook_style, 
+                   voice_speed, music_volume, add_watermark],
+            outputs=[video_output, caption_output, hashtags_output]
+        )
+    
+    demo.launch(share=True, debug=True)
+
+
+# =============================================================================
+# MAIN EXECUTION
+# =============================================================================
+
+if __name__ == "__main__":
+    print("🚗 AI CAR CONTENT STUDIO")
+    print("Run each cell sequentially in Google Colab")
+    print("\\nRecommended execution order:")
+    print("1. cell1_setup()")
+    print("2. cell2_download_models()")
+    print("3. config = cell3_config()")
+    print("4. avatar_processor = cell4_avatar_processor(config)")
+    print("5. lip_sync_engine = cell5_lipsync_engine(config)")
+    print("6. content_engine = cell6_content_engine(config)")
+    print("7. audio_engine = cell7_audio_engine(config)")
+    print("8. video_engine = cell8_video_engine(config)")
+    print("9. studio = cell9_pipeline(config, avatar_processor, lip_sync_engine, content_engine, audio_engine, video_engine)")
+    print("10. results = studio.generate_all_videos('/content/car_ai_studio/inputs/face.mp4')")
+    print("\\nOr simply run: cell10_execute()")
+'''
+
+# Save the script
+with open('/mnt/agents/output/ai_car_content_studio.py', 'w') as f:
+    f.write(notebook_script)
+
+print("✅ Python script saved!")
+print("Now creating the Jupyter notebook format...")
