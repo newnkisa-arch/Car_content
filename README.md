@@ -1415,11 +1415,279 @@ if __name__ == "__main__":
     print("9. studio = cell9_pipeline(config, avatar_processor, lip_sync_engine, content_engine, audio_engine, video_engine)")
     print("10. results = studio.generate_all_videos('/content/car_ai_studio/inputs/face.mp4')")
     print("\\nOr simply run: cell10_execute()")
-'''
+'
+# 🤖 CELL 0: META UPDATE VISION - Auto Fix + Auto Retry
+import sys, traceback, time
+from openai import OpenAI
+from google.colab import userdata
+from IPython import get_ipython
 
-# Save the script
-with open('/mnt/agents/output/ai_car_content_studio.py', 'w') as f:
-    f.write(notebook_script)
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=userdata.get('OPENROUTER_API_KEY'),
+    timeout=60
+)
 
-print("✅ Python script saved!")
-print("Now creating the Jupyter notebook format...")
+ipython = get_ipython()
+original_cell = [None]
+
+SYSTEM_PROMPT = """You are META UPDATE VISION, lead engineer for Kwakye Automobiles autopilot.
+
+CONTEXT: Colab pipeline for Ghana car education videos in Twi Asante.
+Stack: OpenRouter free models, Wav2Lip torch==2.0.1, FFmpeg, YouTube API.
+
+RULES:
+1. NEVER suggest paid APIs. Only free tools.
+2. Wav2Lip ONLY works with torch==2.0.1. If torch/CUDA error, give downgrade.
+3. If PPA timeout like deadsnakes, give rm command for.list files.
+4. If wav2lip_gan.pth missing, give wget to /content/Wav2Lip/checkpoints/
+5. If ModuleNotFoundError, give!pip install -q package
+6. If FFmpeg not found, give!apt-get install -y ffmpeg -qq
+7. If GPU not available, output: print('Runtime → Change runtime type → T4 GPU')
+8. Output ONLY runnable code. No explanations.
+
+Fix root cause in one shot."""
+
+def ask_meta_ai(error_text, cell_code):
+    try:
+        res = client.chat.completions.create(
+            model="meta-llama/llama-3.1-70b-instruct:free",
+            messages=[
+                {"role":"system", "content": SYSTEM_PROMPT},
+                {"role":"user", "content": f"Error:\n{error_text}\n\nCode:\n{cell_code}"}
+            ],
+            temperature=0.1, max_tokens=300
+        )
+        return res.choices[0].message.content.strip().replace('```python','').replace('```','').strip()
+    except: return "print('Add OPENROUTER_API_KEY to Colab Secrets 🔑')"
+
+def meta_exception_handler(shell, etype, evalue, tb, tb_offset=None):
+    error_msg = ''.join(traceback.format_exception(etype, evalue, tb))
+    failed_code = ipython.user_ns.get('In', [''])[-1]
+    original_cell[0] = failed_code
+    print("\n" + "="*60)
+    print("🚨 META UPDATE VISION DETECTED CRASH")
+    print(f"⚠️ {etype.__name__}: {evalue}")
+    fix_code = ask_meta_ai(error_msg, failed_code)
+    print(f"\n💡 AUTO-FIX:\n{'-'*60}\n{fix_code}\n{'-'*60}")
+    try:
+        ipython.run_cell(fix_code)
+        print("✅ Fix applied. 🔄 Auto-retrying...")
+        time.sleep(2)
+        ipython.run_cell(original_cell[0])
+    except: ipython.showtraceback((etype, evalue, tb), tb_offset=tb_offset)
+
+ipython.set_custom_exc((Exception,), meta_exception_handler)
+print("✅ META UPDATE VISION ACTIVE - All crashes will auto-fix + retry")
+# 🔧 CELL 1: INSTALLS - Crash proof
+# Remove broken PPAs that cause timeout
+!rm -f /etc/apt/sources.list.d/deadsnakes-ubuntu-ppa-jammy.list
+!rm -f /etc/apt/sources.list.d/ubuntugis-ubuntu-ppa-jammy.list
+
+# Core tools
+!apt-get update -qq
+!apt-get install -y ffmpeg -qq
+
+# Python libs - pinned versions for Wav2Lip
+!pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118 -q
+!pip install opencv-python-headless librosa soundfile openai tenacity python-dotenv moviepy -q
+!pip install gtts google-auth-oauthlib google-api-python-client -q
+
+# Clone Wav2Lip + download model
+!git clone https://github.com/Rudrabha/Wav2Lip.git /content/Wav2Lip -q
+!wget 'https://iiitaphyd-my.sharepoint.com/personal/radrabha_m_research_iiit_ac_in/_layouts/15/download.aspx?share=EQQz5KlT7KVIuhDfsofnDX0B5tYZoOltM4Zz4vH4Ciw4Hg' -O /content/Wav2Lip/checkpoints/wav2lip_gan.pth -q
+
+# Mount Drive for saving videos/logs
+from google.colab import drive
+drive.mount('/content/drive')
+
+print("✅ All installs done. Check: /content/Wav2Lip/checkpoints/wav2lip_gan.pth exists")
+# 🔧 CELL 1: INSTALLS - Crash proof
+# Remove broken PPAs that cause timeout
+!rm -f /etc/apt/sources.list.d/deadsnakes-ubuntu-ppa-jammy.list
+!rm -f /etc/apt/sources.list.d/ubuntugis-ubuntu-ppa-jammy.list
+
+# Core tools
+!apt-get update -qq
+!apt-get install -y ffmpeg -qq
+
+# Python libs - pinned versions for Wav2Lip
+!pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118 -q
+!pip install opencv-python-headless librosa soundfile openai tenacity python-dotenv moviepy -q
+!pip install gtts google-auth-oauthlib google-api-python-client -q
+
+# Clone Wav2Lip + download model
+!git clone https://github.com/Rudrabha/Wav2Lip.git /content/Wav2Lip -q
+!wget 'https://iiitaphyd-my.sharepoint.com/personal/radrabha_m_research_iiit_ac_in/_layouts/15/download.aspx?share=EQQz5KlT7KVIuhDfsofnDX0B5tYZoOltM4Zz4vH4Ciw4Hg' -O /content/Wav2Lip/checkpoints/wav2lip_gan.pth -q
+
+# Mount Drive for saving videos/logs
+from google.colab import drive
+drive.mount('/content/drive')
+
+print("✅ All installs done. Check: /content/Wav2Lip/checkpoints/wav2lip_gan.pth exists")
+# 📁 CELL 2: FOLDERS
+import os
+paths = ['/content/drive/MyDrive/KwakyeAI/avatars',
+         '/content/drive/MyDrive/KwakyeAI/output',
+         '/content/drive/MyDrive/KwakyeAI/logos']
+for p in paths: os.makedirs(p, exist_ok=True)
+print("✅ Folders ready in /content/drive/MyDrive/KwakyeAI/")# 🤖 CELL 3: OPENROUTER - Crash proof
+from openai import OpenAI
+from google.colab import userdata
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=userdata.get('OPENROUTER_API_KEY'),
+    timeout=60.0
+)
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+def safe_api_call(messages):
+    return client.chat.completions.create(
+        model="meta-llama/llama-3.1-8b-instruct:free",
+        messages=messages,
+        temperature=0.7
+    )
+
+print("✅ OpenRouter ready with auto-retry")
+# 🎮 CELL 4: GPU CHECK
+import torch
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print(f"✅ Device: {device}")
+if device == 'cpu': print("⚠️ Go Runtime → Change runtime type → T4 GPU")
+# 📱 CELL 5: LOAD AVATAR MODEL
+import sys
+sys.path.append('/content/Wav2Lip')
+import torch
+from Wav2Lip import Wav2Lip
+
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+model = Wav2Lip()
+checkpoint = torch.load('/content/Wav2Lip/checkpoints/wav2lip_gan.pth', map_location=device)
+model.load_state_dict(checkpoint['state_dict'])
+model = model.to(device).eval()
+print("✅ Wav2Lip model loaded - avatar is now ALIVE")
+# ✍️ CELL 6: SCRIPT GEN - Twi Asante
+def generate_script(topic):
+    prompt = f"Write a 30-second YouTube Shorts script in Twi Asante about {topic} for Ghana drivers. Start with 'Maakye!'. Educational + engaging."
+    try:
+        res = safe_api_call([{"role":"user", "content": prompt}])
+        return res.choices[0].message.content
+    except:
+        return "Maakye! Ɛnnɛ yɛbɛkasa fa kar ho. Hwɛ wo engine oil daa na wo kar nnya ɔhaw."
+
+print("✅ Script generator ready")
+# 🔊 CELL 7: VOICE - gTTS Twi
+from gtts import gTTS
+import uuid
+
+def generate_voice(script_text):
+    path = f"/content/drive/MyDrive/KwakyeAI/output/voice_{uuid.uuid4().hex[:6]}.mp3"
+    tts = gTTS(text=script_text, lang='en', tld='com.gh') # Ghana accent
+    tts.save(path)
+    return path
+
+print("✅ TTS ready")
+# ✍️ CELL 6: SCRIPT GEN - Twi Asante
+def generate_script(topic):
+    prompt = f"Write a 30-second YouTube Shorts script in Twi Asante about {topic} for Ghana drivers. Start with 'Maakye!'. Educational + engaging."
+    try:
+        res = safe_api_call([{"role":"user", "content": prompt}])
+        return res.choices[0].message.content
+    except:
+        return "Maakye! Ɛnnɛ yɛbɛkasa fa kar ho. Hwɛ wo engine oil daa na wo kar nnya ɔhaw."
+
+print("✅ Script generator ready")
+
+# 🔊 CELL 7: VOICE - gTTS Twi
+from gtts import gTTS
+import uuid
+
+def generate_voice(script_text):
+    path = f"/content/drive/MyDrive/KwakyeAI/output/voice_{uuid.uuid4().hex[:6]}.mp3"
+    tts = gTTS(text=script_text, lang='en', tld='com.gh') # Ghana accent
+    tts.save(path)
+    return path
+
+print("✅ TTS ready")
+# 🎬 CELL 8: VIDEO COMPOSER
+import cv2, librosa, numpy as np
+from moviepy.editor import *
+import subprocess
+
+def create_video(avatar_path, audio_path, logo_path, output_path):
+    # Run Wav2Lip
+    cmd = f"cd /content/Wav2Lip && python inference.py --checkpoint_path checkpoints/wav2lip_gan.pth --face {avatar_path} --audio {audio_path} --outfile /content/temp.mp4"
+    subprocess.call(cmd, shell=True)
+
+    # Add logo + watermark
+    video = VideoFileClip("/content/temp.mp4")
+    logo = ImageClip(logo_path).set_duration(video.duration).resize(height=50).set_pos(("right","top"))
+    final = CompositeVideoClip([video, logo])
+    final.write_videofile(output_path, codec='libx264', audio_codec='aac', logger=None)
+    return output_path
+
+print("✅ Video composer ready")
+# 📤 CELL 9: YOUTUBE UPLOAD
+import pickle, os
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+from google.colab import userdata
+
+def upload_youtube(video_path, title, desc):
+    creds = None
+    if os.path.exists('/content/drive/MyDrive/token.pickle'):
+        with open('/content/drive/MyDrive/token.pickle', 'rb') as f: creds = pickle.load(f)
+    else:
+        client_secret = userdata.get('YOUTUBE_CLIENT_SECRET_JSON')
+        with open('/content/client_secret.json','w') as f: f.write(client_secret)
+        flow = InstalledAppFlow.from_client_secrets_file('/content/client_secret.json',
+               ['https://www.googleapis.com/auth/youtube.upload'])
+        creds = flow.run_local_server(port=0)
+        with open('/content/drive/MyDrive/token.pickle', 'wb') as f: pickle.dump(creds, f)
+
+    youtube = build('youtube', 'v3', credentials=creds)
+    request = youtube.videos().insert(
+        part="snippet,status",
+        body={"snippet": {"title": title, "description": desc, "tags": ["Ghana","Cars","Twi"]},
+              "status": {"privacyStatus": "public", "selfDeclaredMadeForKids": False}},
+        media_body=MediaFileUpload(video_path)
+    )
+    response = request.execute()
+    return f"https://youtube.com/watch?v={response['id']}"
+
+print("✅ YouTube uploader ready")
+# 📅 CELL 10: AUTO SCHEDULER
+import schedule, time, gc, traceback
+
+def safe_job():
+    try:
+        print(f"\n🚀 Job start {time.ctime()}")
+        topic = "How to check engine oil"
+        script = generate_script(topic)
+        audio = generate_voice(script)
+        video = create_video('/content/drive/MyDrive/KwakyeAI/avatars/me.mp4',
+                           audio,
+                           '/content/drive/MyDrive/KwakyeAI/logos/logo.png',
+                           f'/content/drive/MyDrive/KwakyeAI/output/{int(time.time())}.mp4')
+        link = upload_youtube(video, f"{topic} #Shorts", script)
+        print(f"✅ Posted: {link}")
+        gc.collect()
+    except Exception as e:
+        print(f"❌ Job failed but continuing: {e}")
+        traceback.print_exc()
+
+schedule.every().day.at("08:00").do(safe_job)
+schedule.every().day.at("18:00").do(safe_job)
+
+print("✅ Scheduler started. Runs 8am + 6pm Ghana time.")
+while True:
+    try:
+        schedule.run_pending()
+        time.sleep(60)
+    except KeyboardInterrupt:
+        print("🛑 Stopped")
+        break
+    except: time.sleep(60)
